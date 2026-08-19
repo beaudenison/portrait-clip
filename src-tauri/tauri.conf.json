@@ -1,0 +1,52 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Portrait Clip",
+  "version": "1.0.0",
+  "identifier": "com.portraitclip.app",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "npm.cmd run dev",
+    "beforeBuildCommand": "npm.cmd run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Portrait Clip",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 1100,
+        "minHeight": 720,
+        "decorations": false,
+        "resizable": true,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": null,
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["**"]
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/henry.icns",
+      "icons/icon.ico"
+    ],
+    "resources": ["resources/ffmpeg.exe", "resources/ffprobe.exe"],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    },
+    "shortDescription": "Reframe stream recordings into vertical shorts",
+    "longDescription": "Portrait Clip turns landscape gameplay recordings into TikTok, Shorts, and Reels layouts with local FFmpeg export."
+  }
+}
