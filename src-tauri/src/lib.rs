@@ -326,40 +326,112 @@ fn detect_encoder(app: AppHandle) -> Result<EncoderInfo, String> {
     Ok(choose_encoder(&app))
 }
 
-fn choose_encoder(app: &AppHandle) -> EncoderInfo {
-    let Ok(bin) = ffmpeg(app) else {
-        return EncoderInfo {
-            encoder: "libx264".into(),
-            label: "Software H.264".into(),
-        };
+fn software_encoder() -> EncoderInfo {
+    EncoderInfo {
+        encoder: "libx264".into(),
+        label: "Software H.264".into(),
+    }
+}
+
+/// Encode one frame. The bundled FFmpeg lists NVENC, AMF, and Quick Sync even
+/// when that hardware is not installed, so the name list is not enough.
+fn encoder_works(bin: &Path, encoder: &str) -> bool {
+    let mut child = match command(bin)
+        .args([
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=black:s=256x256:d=0.1:r=30",
+            "-frames:v",
+            "1",
+            "-an",
+            "-c:v",
+            encoder,
+            "-f",
+            "null",
+            "-",
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(_) => return false,
     };
-    let out = command(&bin)
-        .args(["-hide_banner", "-encoders"])
-        .output()
-        .ok();
-    let text = out
-        .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
-        .unwrap_or_default();
-    if text.contains("h264_nvenc") {
-        EncoderInfo {
-            encoder: "h264_nvenc".into(),
-            label: "NVIDIA NVENC".into(),
+    let started = std::time::Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return status.success(),
+            Ok(None) if started.elapsed() > std::time::Duration::from_secs(8) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return false;
+            }
+            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(40)),
+            Err(_) => return false,
         }
-    } else if text.contains("h264_amf") {
-        EncoderInfo {
-            encoder: "h264_amf".into(),
-            label: "AMD AMF".into(),
+    }
+}
+
+fn choose_encoder(app: &AppHandle) -> EncoderInfo {
+    static CACHED: std::sync::OnceLock<EncoderInfo> = std::sync::OnceLock::new();
+    CACHED.get_or_init(|| select_encoder(app)).clone()
+}
+
+fn select_encoder(app: &AppHandle) -> EncoderInfo {
+    let Ok(bin) = ffmpeg(app) else {
+        return software_encoder();
+    };
+    const HARDWARE: &[(&str, &str)] = &[
+        ("h264_nvenc", "NVIDIA NVENC"),
+        ("h264_amf", "AMD AMF"),
+        ("h264_qsv", "Intel Quick Sync"),
+    ];
+    for (encoder, label) in HARDWARE {
+        if encoder_works(&bin, encoder) {
+            return EncoderInfo {
+                encoder: (*encoder).into(),
+                label: (*label).into(),
+            };
         }
-    } else if text.contains("h264_qsv") {
-        EncoderInfo {
-            encoder: "h264_qsv".into(),
-            label: "Intel Quick Sync".into(),
-        }
-    } else {
-        EncoderInfo {
-            encoder: "libx264".into(),
-            label: "Software H.264".into(),
-        }
+    }
+    software_encoder()
+}
+
+fn run_encoded(
+    app: &AppHandle,
+    lock: &ExportLock,
+    ff: Vec<String>,
+    encoder: &EncoderInfo,
+    tail: &[String],
+    duration: f64,
+    message: &str,
+) -> Result<(), String> {
+    let with_encoder = |mut args: Vec<String>, name: &str| {
+        args.extend(encoder_args(name));
+        args.extend(tail.iter().cloned());
+        args
+    };
+    match run_ffmpeg(
+        app,
+        lock,
+        with_encoder(ff.clone(), &encoder.encoder),
+        duration,
+        message,
+    ) {
+        Ok(()) => Ok(()),
+        Err(err) if encoder.encoder != "libx264" && err != "Export cancelled" => run_ffmpeg(
+            app,
+            lock,
+            with_encoder(ff, "libx264"),
+            duration,
+            message,
+        ),
+        Err(err) => Err(err),
     }
 }
 
@@ -609,22 +681,20 @@ fn export_clip(
     if probe.has_audio {
         ff.extend(["-map".into(), "[aout]".into(), "-c:a".into(), "aac".into(), "-b:a".into(), "160k".into()]);
     }
-    ff.extend(encoder_args(&encoder.encoder));
-    ff.extend(
-        [
-            "-pix_fmt",
-            "yuv420p",
-            "-r",
-            &args.fps.to_string(),
-            "-movflags",
-            "+faststart",
-            &args.output_path,
-        ]
-        .into_iter()
-        .map(|s| s.to_string()),
-    );
+    let tail: Vec<String> = [
+        "-pix_fmt",
+        "yuv420p",
+        "-r",
+        &args.fps.to_string(),
+        "-movflags",
+        "+faststart",
+        &args.output_path,
+    ]
+    .into_iter()
+    .map(|s| s.to_string())
+    .collect();
 
-    run_ffmpeg(&app, &lock, ff, duration, "Compiling clip")?;
+    run_encoded(&app, &lock, ff, &encoder, &tail, duration, "Compiling clip")?;
     write_thumbnail(&app, &args.output_path, &args.thumbnail_path)?;
     let _ = app.emit(
         "export-progress",
@@ -726,25 +796,31 @@ fn export_montage(
     ff.push(filter);
     ff.extend(["-map".into(), "[vout]".into(), "-map".into(), "[aout]".into()]);
     let encoder = choose_encoder(&app);
-    ff.extend(encoder_args(&encoder.encoder));
-    ff.extend(
-        [
-            "-c:a",
-            "aac",
-            "-b:a",
-            "160k",
-            "-pix_fmt",
-            "yuv420p",
-            "-movflags",
-            "+faststart",
-            &args.output_path,
-        ]
-        .into_iter()
-        .map(|s| s.to_string()),
-    );
+    let tail: Vec<String> = [
+        "-c:a",
+        "aac",
+        "-b:a",
+        "160k",
+        "-pix_fmt",
+        "yuv420p",
+        "-movflags",
+        "+faststart",
+        &args.output_path,
+    ]
+    .into_iter()
+    .map(|s| s.to_string())
+    .collect();
 
     let total: f64 = probes.iter().map(|p| p.duration).sum();
-    run_ffmpeg(&app, &lock, ff, total.max(0.1), "Creating montage")?;
+    run_encoded(
+        &app,
+        &lock,
+        ff,
+        &encoder,
+        &tail,
+        total.max(0.1),
+        "Creating montage",
+    )?;
     write_thumbnail(&app, &args.output_path, &args.thumbnail_path)?;
     let _ = app.emit(
         "export-progress",
@@ -838,5 +914,27 @@ mod tests {
             filter.contains("scale=1080:1306:force_original_aspect_ratio=increase,crop=1080:1306,setsar=1"),
             "{filter}"
         );
+    }
+
+    fn bundled_ffmpeg() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("resources")
+            .join("ffmpeg.exe")
+    }
+
+    #[test]
+    fn software_h264_encodes_a_frame() {
+        assert!(encoder_works(&bundled_ffmpeg(), "libx264"));
+    }
+
+    #[test]
+    fn missing_hardware_encoder_is_rejected() {
+        let bin = bundled_ffmpeg();
+        assert!(!encoder_works(&bin, "h264_does_not_exist"));
+        let chosen = ["h264_nvenc", "h264_amf", "h264_qsv"]
+            .into_iter()
+            .find(|name| encoder_works(&bin, name))
+            .unwrap_or("libx264");
+        assert!(encoder_works(&bin, chosen), "{chosen}");
     }
 }

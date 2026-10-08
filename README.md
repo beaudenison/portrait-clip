@@ -24,7 +24,7 @@ Crop gameplay and webcam, split and cut on a timeline, compile locally. No accou
 - Defaults in **Settings**: resolution, FPS, export folder
 - Stitch compiled clips into a montage
 
-See [CHANGELOG.md](CHANGELOG.md) for what changed in 1.0.1.
+See [CHANGELOG.md](CHANGELOG.md) for what changed in 1.0.2.
 
 Exports go to `Documents\Portrait Clip\Exports` unless you change the folder.
 
@@ -33,7 +33,7 @@ Exports go to `Documents\Portrait Clip\Exports` unless you change the folder.
 1. Download **Portrait Clip_x.x.x_x64-setup.exe** from [Releases](https://github.com/beaudenison/portrait-clip/releases/latest).
 2. Run the setup. It installs for the current Windows user.
 
-To update from 1.0.0, download the 1.0.1 setup and run it. It **replaces** the existing install. Your clips, layouts, and settings stay on this PC.
+To update, download the latest setup and run it. It **replaces** the existing install. Your clips, layouts, and settings stay on this PC.
 
 Requires **Windows 10 or 11** (64-bit).
 

@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.2 — 2026-10-08
+
+- Compile uses NVIDIA, AMD, or Intel only when that encoder actually opens. Other PCs get software H.264 instead of a failed export.
+- To update, run the 1.0.2 setup. It replaces 1.0.1. Your clips, layouts, and settings stay on this PC.
+
 ## 1.0.1 — 2026-10-07
 
 - Default layout puts the camera bar on top and the gameplay underneath.
