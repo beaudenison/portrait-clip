@@ -29,7 +29,10 @@ export interface Layer {
   color: string;
   input: RectNorm;
   output: RectNorm;
+  /** Pixel width / height shared by the input crop and the output box. */
+  aspect?: number;
   locked: boolean;
+  /** @deprecated always locked; kept so older saves still load */
   lockAspect: boolean;
   visible: boolean;
 }

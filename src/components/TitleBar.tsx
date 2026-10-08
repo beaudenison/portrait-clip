@@ -1,5 +1,6 @@
 import type { View } from "../types";
 import { closeWindow, minimizeWindow, toggleMaximize } from "../lib/backend";
+import { IconClose, IconGear } from "./icons";
 
 export default function TitleBar({
   view,
@@ -44,18 +45,18 @@ export default function TitleBar({
           </button>
         </nav>
       </div>
-      <button className="icon-btn settings-btn" onClick={onSettings} title="Settings">
-        Settings
+      <button className="icon-btn settings-btn" onClick={onSettings} title="Settings" aria-label="Settings">
+        <IconGear />
       </button>
       <div className="window-controls">
         <button onClick={() => void minimizeWindow()} aria-label="Minimize">
-          ─
+          <span className="win-glyph min" />
         </button>
         <button onClick={() => void toggleMaximize()} aria-label="Maximize">
-          □
+          <span className="win-glyph max" />
         </button>
         <button className="close" onClick={() => void closeWindow()} aria-label="Close">
-          ✕
+          <IconClose />
         </button>
       </div>
     </header>

@@ -472,7 +472,7 @@ fn build_clip_filter(args: &ExportClipArgs, src_w: i64, src_h: i64, has_audio: b
         let dw = even((layer.output.w * ow as f64).round() as i64).max(2);
         let dh = even((layer.output.h * oh as f64).round() as i64).max(2);
         fc.push_str(&format!(
-            ";[src{i}]crop={cw}:{ch}:{cx}:{cy},scale={dw}:{dh}[ly{i}]"
+            ";[src{i}]crop={cw}:{ch}:{cx}:{cy},scale={dw}:{dh}:force_original_aspect_ratio=increase,crop={dw}:{dh},setsar=1[ly{i}]"
         ));
     }
 
@@ -804,5 +804,39 @@ mod tests {
         assert_eq!(even(1080), 1080);
         assert_eq!(even(1081), 1080);
         assert_eq!(even(1), 2);
+    }
+
+    #[test]
+    fn layer_scale_covers_instead_of_stretching() {
+        let args = ExportClipArgs {
+            source_path: String::new(),
+            output_path: String::new(),
+            thumbnail_path: String::new(),
+            segments: vec![TimeSegment { start: 0.0, end: 1.0 }],
+            output_width: 1080,
+            output_height: 1920,
+            fps: 30,
+            blur_background: false,
+            layers: vec![LayerSpec {
+                input: RectNorm {
+                    x: 0.27,
+                    y: 0.0,
+                    w: 0.46,
+                    h: 1.0,
+                },
+                output: RectNorm {
+                    x: 0.0,
+                    y: 0.0,
+                    w: 1.0,
+                    h: 0.68,
+                },
+                visible: true,
+            }],
+        };
+        let (filter, _) = build_clip_filter(&args, 1920, 1080, false);
+        assert!(
+            filter.contains("scale=1080:1306:force_original_aspect_ratio=increase,crop=1080:1306,setsar=1"),
+            "{filter}"
+        );
     }
 }

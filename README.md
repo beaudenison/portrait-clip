@@ -15,12 +15,16 @@ Crop gameplay and webcam, split and cut on a timeline, compile locally. No accou
 ## Features
 
 - Upload a clip (MP4, MOV, MKV, WEBM, or AVI)
-- Drag **Content** and **Camera** crops onto a vertical, square, or landscape canvas
-- Presets: Portrait Split, Portrait Crop, Full Blur — or save your own layout
-- Split at the playhead, trim each piece, delete the parts you do not want
-- Compile on this PC with FFmpeg (720p / 1080p, 30 / 60 fps)
+- Drag **Camera** and **Content** crops onto a vertical, square, or landscape canvas
+- New clips start with the camera on top and the gameplay underneath
+- Locked layers keep their shape. Resizing the camera zooms instead of stretching. Unlock a layer when you want a free shape
+- Drag the timeline to scrub. Split at the playhead, trim each piece, delete the parts you do not want
+- Save your own layouts
+- Compile on this PC with FFmpeg (720p / 1080p, 30 / 60 fps). The export is a video only
 - Defaults in **Settings**: resolution, FPS, export folder
 - Stitch compiled clips into a montage
+
+See [CHANGELOG.md](CHANGELOG.md) for what changed in 1.0.1.
 
 Exports go to `Documents\Portrait Clip\Exports` unless you change the folder.
 
@@ -29,7 +33,7 @@ Exports go to `Documents\Portrait Clip\Exports` unless you change the folder.
 1. Download **Portrait Clip_x.x.x_x64-setup.exe** from [Releases](https://github.com/beaudenison/portrait-clip/releases/latest).
 2. Run the setup. It installs for the current Windows user.
 
-To update, download the newer setup and run it. It **replaces** the existing install. Your clips, layouts, and settings stay on this PC.
+To update from 1.0.0, download the 1.0.1 setup and run it. It **replaces** the existing install. Your clips, layouts, and settings stay on this PC.
 
 Requires **Windows 10 or 11** (64-bit).
 

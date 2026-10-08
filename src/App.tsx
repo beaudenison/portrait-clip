@@ -207,9 +207,9 @@ export default function App() {
                 layouts: library.layouts.filter((l) => l.id !== id),
               })
             }
-            onExported={(clip, exportPath, thumbnailPath) => {
-              const updated = { ...clip, exportPath, thumbnailPath };
-              setProject({ ...project, exportPath, thumbnailPath });
+            onExported={(clip, exportPath) => {
+              const updated = { ...clip, exportPath, thumbnailPath: undefined };
+              setProject({ ...project, exportPath, thumbnailPath: undefined });
               void persist({
                 ...library,
                 clips: library.clips.map((c) =>

@@ -2,6 +2,7 @@ import { useRef } from "react";
 import type { TimelineClip } from "../types";
 import { formatTime } from "../lib/geometry";
 import { sourceToTimeline, timelineToSource, totalDuration } from "../lib/timeline";
+import { IconMute, IconPause, IconPlay, IconVolume } from "./icons";
 
 export default function Timeline({
   clips,
@@ -46,17 +47,27 @@ export default function Timeline({
   return (
     <div className="timeline">
       <div className="time-row">
-        <button className="btn" onClick={onTogglePlay}>
-          {playing ? "Pause" : "Play"}
+        <button
+          className="btn btn-accent transport"
+          onClick={onTogglePlay}
+          title={playing ? "Pause (Space)" : "Play (Space)"}
+          aria-label={playing ? "Pause" : "Play"}
+        >
+          {playing ? <IconPause /> : <IconPlay />}
         </button>
-        <button className="btn-ghost" onClick={onToggleMute}>
-          {muted ? "Unmute" : "Mute"}
+        <button
+          className="btn-ghost transport"
+          onClick={onToggleMute}
+          title={muted ? "Unmute" : "Mute"}
+          aria-label={muted ? "Unmute" : "Mute"}
+        >
+          {muted ? <IconMute /> : <IconVolume />}
         </button>
         <button className="btn" onClick={onSplit} title="Split at playhead (S)">
           Split
         </button>
-        <button className="btn-danger" onClick={onDelete} disabled={!canDelete}>
-          Delete clip
+        <button className="btn-danger" onClick={onDelete} disabled={!canDelete} title="Delete the selected clip">
+          Delete
         </button>
         <span className="clock">
           {formatTime(sourceToTimeline(clips, currentSource))} / {formatTime(total)}
@@ -64,9 +75,26 @@ export default function Timeline({
         <div
           ref={railRef}
           className="rail packed"
-          onClick={(e) => {
-            if ((e.target as HTMLElement).closest(".clip-block")) return;
-            onSeekSource(timeFromClientX(e.clientX));
+          onPointerDown={(e) => {
+            if ((e.target as HTMLElement).closest(".clip-edge")) return;
+            if (e.button !== 0) return;
+            e.preventDefault();
+            const rail = railRef.current;
+            if (!rail) return;
+            rail.setPointerCapture(e.pointerId);
+            const seek = (clientX: number) => onSeekSource(timeFromClientX(clientX));
+            seek(e.clientX);
+            const move = (ev: PointerEvent) => seek(ev.clientX);
+            const up = (ev: PointerEvent) => {
+              seek(ev.clientX);
+              rail.releasePointerCapture(ev.pointerId);
+              rail.removeEventListener("pointermove", move);
+              rail.removeEventListener("pointerup", up);
+              rail.removeEventListener("pointercancel", up);
+            };
+            rail.addEventListener("pointermove", move);
+            rail.addEventListener("pointerup", up);
+            rail.addEventListener("pointercancel", up);
           }}
         >
           {clips.map((clip) => {
@@ -80,8 +108,6 @@ export default function Timeline({
                 onClick={(e) => {
                   e.stopPropagation();
                   onSelect(clip.id);
-                  const t = timeFromClientX(e.clientX);
-                  onSeekSource(t);
                 }}
               >
                 {selected && (

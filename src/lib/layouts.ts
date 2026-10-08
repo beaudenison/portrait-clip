@@ -1,24 +1,107 @@
-import type { Layout, Layer, OutputFormat } from "../types";
+import type { Layer, Layout, OutputFormat, RectNorm } from "../types";
 import { LAYER_COLORS } from "../types";
-import { uid } from "./geometry";
+import { pixelAspectOf, snapRectToAspect, uid } from "./geometry";
+
+const CAMERA_ASPECT = 16 / 9;
+const SOURCE_ASPECT = 16 / 9;
+
+const FORMAT_ASPECT: Record<OutputFormat, number> = {
+  portrait: 9 / 16,
+  square: 1,
+  landscape: 16 / 9,
+};
 
 function layer(
   name: string,
   color: string,
-  input: Layer["input"],
-  output: Layer["output"],
+  aspect: number,
+  input: RectNorm,
+  output: RectNorm,
   extra: Partial<Layer> = {},
 ): Omit<Layer, "id"> {
   return {
     name,
     color,
+    aspect,
     input,
     output,
     locked: false,
-    lockAspect: false,
+    lockAspect: true,
     visible: true,
     ...extra,
   };
+}
+
+/** Normalized rect of `pixelAspect` inside a frame of `frameAspect` (width / height). */
+function placed(
+  pixelAspect: number,
+  frameAspect: number,
+  w: number,
+  x: number,
+  y: number,
+): RectNorm {
+  const h = (w * frameAspect) / pixelAspect;
+  return { x, y, w, h };
+}
+
+function portraitSplit(): Layout["layers"] {
+  const frame = FORMAT_ASPECT.portrait;
+  const cameraH = frame / CAMERA_ASPECT;
+  const contentH = 1 - cameraH;
+  const contentAspect = frame / contentH;
+  const contentInW = contentAspect / SOURCE_ASPECT;
+  return [
+    layer(
+      "Camera",
+      LAYER_COLORS[1],
+      CAMERA_ASPECT,
+      { x: 0, y: 0, w: 0.32, h: 0.32 },
+      { x: 0, y: 0, w: 1, h: cameraH },
+    ),
+    layer(
+      "Content",
+      LAYER_COLORS[0],
+      contentAspect,
+      { x: (1 - contentInW) / 2, y: 0, w: contentInW, h: 1 },
+      { x: 0, y: cameraH, w: 1, h: contentH },
+    ),
+  ];
+}
+
+function portraitCrop(): Layout["layers"] {
+  const aspect = FORMAT_ASPECT.portrait;
+  const w = aspect / SOURCE_ASPECT;
+  return [
+    layer(
+      "Content",
+      LAYER_COLORS[0],
+      aspect,
+      { x: (1 - w) / 2, y: 0, w, h: 1 },
+      { x: 0, y: 0, w: 1, h: 1 },
+    ),
+  ];
+}
+
+function fullBlur(): Layout["layers"] {
+  const frame = FORMAT_ASPECT.portrait;
+  const contentOut = placed(CAMERA_ASPECT, frame, 0.92, 0.04, 0.08);
+  const cameraOut = placed(CAMERA_ASPECT, frame, 0.5, 0.25, contentOut.y + contentOut.h + 0.06);
+  return [
+    layer(
+      "Content",
+      LAYER_COLORS[0],
+      CAMERA_ASPECT,
+      { x: 0, y: 0, w: 1, h: 1 },
+      contentOut,
+    ),
+    layer(
+      "Camera",
+      LAYER_COLORS[1],
+      CAMERA_ASPECT,
+      { x: 0.66, y: 0.02, w: 0.32, h: 0.32 },
+      cameraOut,
+    ),
+  ];
 }
 
 export const BUILTIN_LAYOUTS: Layout[] = [
@@ -28,20 +111,7 @@ export const BUILTIN_LAYOUTS: Layout[] = [
     builtin: true,
     outputFormat: "portrait",
     blurBackground: false,
-    layers: [
-      layer(
-        "Content",
-        LAYER_COLORS[0],
-        { x: 0.18, y: 0.0, w: 0.64, h: 1.0 },
-        { x: 0, y: 0, w: 1, h: 0.62 },
-      ),
-      layer(
-        "Camera",
-        LAYER_COLORS[1],
-        { x: 0.72, y: 0.02, w: 0.26, h: 0.36 },
-        { x: 0, y: 0.62, w: 1, h: 0.38 },
-      ),
-    ],
+    layers: portraitSplit(),
   },
   {
     id: "portrait-crop",
@@ -49,14 +119,7 @@ export const BUILTIN_LAYOUTS: Layout[] = [
     builtin: true,
     outputFormat: "portrait",
     blurBackground: false,
-    layers: [
-      layer(
-        "Content",
-        LAYER_COLORS[0],
-        { x: 0.22, y: 0.0, w: 0.56, h: 1.0 },
-        { x: 0, y: 0, w: 1, h: 1 },
-      ),
-    ],
+    layers: portraitCrop(),
   },
   {
     id: "full-blur",
@@ -64,20 +127,7 @@ export const BUILTIN_LAYOUTS: Layout[] = [
     builtin: true,
     outputFormat: "portrait",
     blurBackground: true,
-    layers: [
-      layer(
-        "Content",
-        LAYER_COLORS[0],
-        { x: 0.12, y: 0.08, w: 0.76, h: 0.84 },
-        { x: 0.06, y: 0.18, w: 0.88, h: 0.5 },
-      ),
-      layer(
-        "Camera",
-        LAYER_COLORS[1],
-        { x: 0.72, y: 0.02, w: 0.26, h: 0.36 },
-        { x: 0.28, y: 0.72, w: 0.44, h: 0.22 },
-      ),
-    ],
+    layers: fullBlur(),
   },
 ];
 
@@ -111,4 +161,58 @@ export function captureLayout(
 
 export function defaultProjectLayers(): Layer[] {
   return instantiateLayout(BUILTIN_LAYOUTS[0]).layers;
+}
+
+export function resolveAspect(layer: Layer, outW: number, outH: number): number {
+  if (typeof layer.aspect === "number" && layer.aspect > 0.05 && layer.aspect < 20) {
+    return layer.aspect;
+  }
+  if (layer.name.trim().toLowerCase() === "camera") return CAMERA_ASPECT;
+  const fromOutput = pixelAspectOf(layer.output, outW, outH);
+  if (fromOutput > 0.05 && fromOutput < 20) return fromOutput;
+  return CAMERA_ASPECT;
+}
+
+/** Snap every layer so its input crop and output box share one pixel aspect. */
+export function snapLayers(
+  layers: Layer[],
+  srcW: number,
+  srcH: number,
+  outW: number,
+  outH: number,
+): Layer[] {
+  return layers.map((layer) => {
+    if (layer.lockAspect === false) return layer;
+    const aspect = resolveAspect(layer, outW, outH);
+    return {
+      ...layer,
+      aspect,
+      lockAspect: true,
+      input: snapRectToAspect(layer.input, srcW, srcH, aspect),
+      output: snapRectToAspect(layer.output, outW, outH, aspect),
+    };
+  });
+}
+
+function rectClose(a: RectNorm, b: RectNorm): boolean {
+  return (
+    Math.abs(a.x - b.x) < 1e-4 &&
+    Math.abs(a.y - b.y) < 1e-4 &&
+    Math.abs(a.w - b.w) < 1e-4 &&
+    Math.abs(a.h - b.h) < 1e-4
+  );
+}
+
+export function layerListClose(a: Layer[], b: Layer[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((layer, i) => {
+    const other = b[i];
+    return (
+      layer.id === other.id &&
+      Math.abs((layer.aspect ?? 0) - (other.aspect ?? 0)) < 1e-4 &&
+      layer.lockAspect === other.lockAspect &&
+      rectClose(layer.input, other.input) &&
+      rectClose(layer.output, other.output)
+    );
+  });
 }

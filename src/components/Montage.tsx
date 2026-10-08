@@ -84,13 +84,12 @@ export default function Montage({
       const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
       const base = `${sanitizeFilename(title)}-${stamp}`;
       const outputPath = await joinPath(dir, `${base}.mp4`);
-      const thumbnailPath = await joinPath(dir, `${base}.jpg`);
       const first = ordered[0];
       const size = OUTPUT_SIZES[first.quality][first.outputFormat];
       await exportMontage({
         clipPaths: ordered.map((c) => c.exportPath!),
         outputPath,
-        thumbnailPath,
+        thumbnailPath: "",
         transition,
         transitionDuration: duration,
         outputWidth: size.width,
@@ -104,7 +103,7 @@ export default function Montage({
         transition,
         transitionDuration: duration,
         exportPath: outputPath,
-        thumbnailPath,
+        thumbnailPath: "",
         createdAt: new Date().toISOString(),
       });
       onToast("Montage exported");

@@ -7,7 +7,6 @@ import type {
   LibraryState,
   Quality,
 } from "../types";
-import { BUILTIN_LAYOUTS } from "./layouts";
 
 export interface ExportClipArgs {
   sourcePath: string;
@@ -230,8 +229,7 @@ export async function closeWindow(): Promise<void> {
 }
 
 export function mergeLayouts(saved: Layout[]): Layout[] {
-  const custom = saved.filter((l) => !l.builtin);
-  return [...BUILTIN_LAYOUTS, ...custom];
+  return saved.filter((l) => !l.builtin);
 }
 
 export { isTauri };

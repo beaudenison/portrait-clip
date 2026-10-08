@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { Layer, OutputFormat } from "../types";
-import { containRect, coverRect } from "../lib/geometry";
+import { containRect, coverCrop, coverRect } from "../lib/geometry";
 import CropOverlay from "./CropOverlay";
 import type { RectNorm } from "../types";
 
@@ -59,9 +59,9 @@ export default function OutputCanvas({
         canvas.width = w;
         canvas.height = h;
       }
-      ctx.fillStyle = "#000";
-      ctx.fillRect(0, 0, w, h);
       if (video && video.readyState >= 2 && video.videoWidth) {
+        ctx.fillStyle = "#000";
+        ctx.fillRect(0, 0, w, h);
         if (blur) {
           ctx.filter = "blur(18px)";
           const cover = coverRect(w, h, video.videoWidth, video.videoHeight);
@@ -89,7 +89,8 @@ export default function OutputCanvas({
           const dw = layer.output.w * w;
           const dh = layer.output.h * h;
           if (sw > 1 && sh > 1 && dw > 1 && dh > 1) {
-            ctx.drawImage(video, sx, sy, sw, sh, dx, dy, dw, dh);
+            const crop = coverCrop(sx, sy, sw, sh, dw, dh);
+            ctx.drawImage(video, crop.sx, crop.sy, crop.sw, crop.sh, dx, dy, dw, dh);
           }
         }
       }

@@ -12,8 +12,8 @@ import type {
   RectNorm,
 } from "../types";
 import { LAYER_COLORS, OUTPUT_SIZES } from "../types";
-import { sanitizeFilename, uid } from "../lib/geometry";
-import { captureLayout, instantiateLayout } from "../lib/layouts";
+import { pixelAspectOf, sanitizeFilename, uid } from "../lib/geometry";
+import { captureLayout, instantiateLayout, layerListClose, snapLayers } from "../lib/layouts";
 import {
   clipAtSource,
   fullClip,
@@ -33,6 +33,7 @@ import InputPreview from "./InputPreview";
 import OutputCanvas from "./OutputCanvas";
 import Timeline from "./Timeline";
 import CompileModal from "./CompileModal";
+import { IconClose, IconEye, IconEyeOff } from "./icons";
 
 export default function Editor({
   project,
@@ -49,11 +50,12 @@ export default function Editor({
   onChange: (p: Project) => void;
   onSaveLayout: (l: Layout) => void;
   onDeleteLayout: (id: string) => void;
-  onExported: (clip: ClipRecord, exportPath: string, thumb: string) => void;
+  onExported: (clip: ClipRecord, exportPath: string) => void;
   onToast: (msg: string, error?: boolean) => void;
   exportDir: string;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const seekState = useRef({ pending: null as number | null, busy: false });
   const [videoEl, setVideoEl] = useState<HTMLVideoElement | null>(null);
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(false);
@@ -77,9 +79,25 @@ export default function Editor({
   const [error, setError] = useState<string | null>(null);
   const [encoder, setEncoder] = useState<EncoderInfo | null>(null);
   const [layoutName, setLayoutName] = useState("");
-  const [selectedId, setSelectedId] = useState<string | null>(
-    project.layers[0]?.id ?? null,
+  const frame = OUTPUT_SIZES[project.quality][project.outputFormat];
+  const layers = useMemo(
+    () =>
+      snapLayers(
+        project.layers,
+        project.sourceWidth || 1920,
+        project.sourceHeight || 1080,
+        frame.width,
+        frame.height,
+      ),
+    [project.layers, project.sourceWidth, project.sourceHeight, frame.width, frame.height],
   );
+  const [selectedId, setSelectedId] = useState<string | null>(
+    layers[0]?.id ?? null,
+  );
+  const projectRef = useRef(project);
+  projectRef.current = project;
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
 
   useEffect(() => {
     setVideoEl(videoRef.current);
@@ -88,6 +106,13 @@ export default function Editor({
   useEffect(() => {
     void detectEncoder().then(setEncoder);
   }, []);
+
+  useEffect(() => {
+    const current = projectRef.current;
+    if (!layerListClose(layers, current.layers)) {
+      onChangeRef.current({ ...current, layers, updatedAt: new Date().toISOString() });
+    }
+  }, [layers]);
 
   useEffect(() => {
     let un: (() => void) | undefined;
@@ -105,6 +130,7 @@ export default function Editor({
       setCurrent(t);
       const host = clipAtSource(segments, t);
       if (host) setSelectedClipId(host.id);
+      if (v.paused) return;
       if (!host) {
         const next = segments.find((c) => c.start >= t - 0.001);
         if (next) {
@@ -168,12 +194,52 @@ export default function Editor({
 
   function updateLayer(id: string, partial: Partial<Layer>) {
     patch({
-      layers: project.layers.map((l) => (l.id === id ? { ...l, ...partial } : l)),
+      layers: layers.map((l) => (l.id === id ? { ...l, ...partial } : l)),
     });
   }
 
   function setRect(which: "input" | "output") {
     return (id: string, rect: RectNorm) => updateLayer(id, { [which]: rect });
+  }
+
+  function seekTo(t: number) {
+    setCurrent(t);
+    const host = clipAtSource(segments, t);
+    if (host) setSelectedClipId(host.id);
+    const v = videoRef.current;
+    if (!v) return;
+    if (!v.paused) {
+      v.pause();
+      setPlaying(false);
+    }
+    const state = seekState.current;
+    state.pending = t;
+    const pump = () => {
+      const el = videoRef.current;
+      const next = state.pending;
+      if (!el || next == null) {
+        state.busy = false;
+        return;
+      }
+      if (Math.abs(el.currentTime - next) < 0.03 && el.readyState >= 2) {
+        state.pending = null;
+        state.busy = false;
+        return;
+      }
+      state.pending = null;
+      state.busy = true;
+      let timer = 0;
+      const finish = () => {
+        window.clearTimeout(timer);
+        el.removeEventListener("seeked", finish);
+        state.busy = false;
+        if (state.pending != null) pump();
+      };
+      el.addEventListener("seeked", finish);
+      timer = window.setTimeout(finish, 180);
+      el.currentTime = next;
+    };
+    if (!state.busy) pump();
   }
 
   function togglePlay() {
@@ -195,28 +261,40 @@ export default function Editor({
   }
 
   function addLayer() {
-    if (project.layers.length >= 6) {
+    if (layers.length >= 6) {
       onToast("Maximum of 6 layers", true);
       return;
     }
-    const n = project.layers.length;
-    const layer: Layer = {
-      id: uid(),
-      name: `Layer ${n + 1}`,
-      color: LAYER_COLORS[n % LAYER_COLORS.length],
-      input: { x: 0.25, y: 0.25, w: 0.5, h: 0.5 },
-      output: { x: 0.15, y: 0.15, w: 0.7, h: 0.4 },
-      locked: false,
-      lockAspect: false,
-      visible: true,
-    };
-    patch({ layers: [...project.layers, layer] });
+    const n = layers.length;
+    const aspect = 16 / 9;
+    const srcW = project.sourceWidth || 1920;
+    const srcH = project.sourceHeight || 1080;
+    const layer: Layer = snapLayers(
+      [
+        {
+          id: uid(),
+          name: `Layer ${n + 1}`,
+          color: LAYER_COLORS[n % LAYER_COLORS.length],
+          aspect,
+          input: { x: 0.34, y: 0.34, w: 0.32, h: 0.32 },
+          output: { x: 0.2, y: 0.2, w: 0.4, h: 0.3 },
+          locked: false,
+          lockAspect: true,
+          visible: true,
+        },
+      ],
+      srcW,
+      srcH,
+      frame.width,
+      frame.height,
+    )[0];
+    patch({ layers: [...layers, layer] });
     setSelectedId(layer.id);
   }
 
   function removeLayer(id: string) {
-    if (project.layers.length <= 1) return;
-    const next = project.layers.filter((l) => l.id !== id);
+    if (layers.length <= 1) return;
+    const next = layers.filter((l) => l.id !== id);
     patch({ layers: next });
     setSelectedId(next[0]?.id ?? null);
   }
@@ -247,12 +325,20 @@ export default function Editor({
 
   function applyLayout(layout: Layout) {
     const inst = instantiateLayout(layout);
+    const size = OUTPUT_SIZES[project.quality][inst.outputFormat];
+    const nextLayers = snapLayers(
+      inst.layers,
+      project.sourceWidth || 1920,
+      project.sourceHeight || 1080,
+      size.width,
+      size.height,
+    );
     patch({
       outputFormat: inst.outputFormat,
       blurBackground: inst.blurBackground,
-      layers: inst.layers,
+      layers: nextLayers,
     });
-    setSelectedId(inst.layers[0]?.id ?? null);
+    setSelectedId(nextLayers[0]?.id ?? null);
   }
 
   async function startExport() {
@@ -264,24 +350,24 @@ export default function Editor({
       const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
       const base = `${sanitizeFilename(project.title)}-${stamp}`;
       const outputPath = await joinPath(dir, `${base}.mp4`);
-      const thumbnailPath = await joinPath(dir, `${base}.jpg`);
       const size = OUTPUT_SIZES[project.quality][project.outputFormat];
       await exportClip({
         sourcePath: project.sourcePath,
         outputPath,
-        thumbnailPath,
+        thumbnailPath: "",
         segments: segments.map((c) => ({ start: c.start, end: c.end })),
         outputWidth: size.width,
         outputHeight: size.height,
         fps: project.fps,
         blurBackground: project.blurBackground,
-        layers: project.layers.map((l) => ({
+        layers: layers.map((l) => ({
           input: l.input,
           output: l.output,
           visible: l.visible,
         })),
       });
-      onExported(project, outputPath, thumbnailPath);
+      onExported(project, outputPath);
+      setError(null);
       setProgress({ percent: 100, time: "", message: "Done" });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -290,14 +376,15 @@ export default function Editor({
     }
   }
 
-  const selectedLayer = project.layers.find((l) => l.id === selectedId) ?? null;
+  const selectedLayer = layers.find((l) => l.id === selectedId) ?? null;
 
   return (
     <div className="editor">
       <aside className="side">
-        <div className="section-title">Output</div>
+        <div className="side-group">
+        <div className="section-title">Format</div>
         <label className="stack">
-          Format
+          Shape
           <select
             className="field"
             value={project.outputFormat}
@@ -314,7 +401,7 @@ export default function Editor({
             checked={project.blurBackground}
             onChange={(e) => patch({ blurBackground: e.target.checked })}
           />
-          Blur background
+          Blur the gaps
         </label>
         <label className="toggle">
           <input
@@ -322,14 +409,16 @@ export default function Editor({
             checked={project.showBorders}
             onChange={(e) => patch({ showBorders: e.target.checked })}
           />
-          Show input borders
+          Show crop boxes
         </label>
+        </div>
 
+        <div className="side-group">
         <div className="section-title">Layers</div>
-        {project.layers.map((layer) => (
+        {layers.map((layer) => (
           <div
             key={layer.id}
-            className={`layer${layer.id === selectedId ? " selected" : ""}`}
+            className={`layer${layer.id === selectedId ? " selected" : ""}${layer.visible ? "" : " is-hidden"}`}
             onClick={() => setSelectedId(layer.id)}
           >
             <div className="layer-top">
@@ -341,23 +430,25 @@ export default function Editor({
               />
               <button
                 className="icon-btn"
-                title="Visibility"
+                title={layer.visible ? "Hide layer" : "Show layer"}
+                aria-label={layer.visible ? "Hide layer" : "Show layer"}
                 onClick={(e) => {
                   e.stopPropagation();
                   updateLayer(layer.id, { visible: !layer.visible });
                 }}
               >
-                {layer.visible ? "◉" : "○"}
+                {layer.visible ? <IconEye /> : <IconEyeOff />}
               </button>
               <button
                 className="icon-btn"
-                title="Delete"
+                title="Remove layer"
+                aria-label="Remove layer"
                 onClick={(e) => {
                   e.stopPropagation();
                   removeLayer(layer.id);
                 }}
               >
-                ✕
+                <IconClose />
               </button>
             </div>
             {selectedLayer?.id === layer.id && (
@@ -374,9 +465,18 @@ export default function Editor({
                   <input
                     type="checkbox"
                     checked={layer.lockAspect}
-                    onChange={(e) =>
-                      updateLayer(layer.id, { lockAspect: e.target.checked })
-                    }
+                    onChange={(e) => {
+                      const lockAspect = e.target.checked;
+                      if (!lockAspect) {
+                        updateLayer(layer.id, { lockAspect: false });
+                        return;
+                      }
+                      const aspect = pixelAspectOf(layer.output, frame.width, frame.height);
+                      updateLayer(layer.id, {
+                        lockAspect: true,
+                        aspect: aspect > 0.05 ? aspect : layer.aspect,
+                      });
+                    }}
                   />
                   Lock aspect ratio
                 </label>
@@ -387,8 +487,13 @@ export default function Editor({
         <button className="btn" style={{ width: "100%" }} onClick={addLayer}>
           Add layer
         </button>
+        </div>
 
-        <div className="section-title">Layouts</div>
+        <div className="side-group">
+        <div className="section-title">Saved layouts</div>
+        {layouts.length === 0 && (
+          <p className="hint">Save this framing to reuse it on the next clip.</p>
+        )}
         <div className="layout-list">
           {layouts.map((layout) => (
             <button
@@ -400,7 +505,6 @@ export default function Editor({
               <small>
                 {layout.outputFormat} · {layout.layers.length} layer
                 {layout.layers.length === 1 ? "" : "s"}
-                {layout.builtin ? "" : " · custom"}
               </small>
             </button>
           ))}
@@ -421,7 +525,7 @@ export default function Editor({
                   name,
                   project.outputFormat,
                   project.blurBackground,
-                  project.layers,
+                  layers,
                 ),
               );
               setLayoutName("");
@@ -440,9 +544,10 @@ export default function Editor({
               if (custom) onDeleteLayout(custom.id);
             }}
           >
-            Delete last custom layout
+            Delete last saved layout
           </button>
         )}
+        </div>
       </aside>
 
       <div className="editor-top">
@@ -477,13 +582,13 @@ export default function Editor({
       <div className="stage">
         <section className="preview-pane">
           <header>
-            <span>Input</span>
+            <span>Source</span>
             <span>{project.sourceWidth}×{project.sourceHeight}</span>
           </header>
           <InputPreview
             src={project.srcUrl}
             videoRef={videoRef}
-            layers={project.layers}
+            layers={layers}
             selectedId={selectedId}
             showBorders={project.showBorders}
             onSelect={setSelectedId}
@@ -505,14 +610,20 @@ export default function Editor({
         </section>
         <section className="preview-pane">
           <header>
-            <span>Output</span>
-            <span>{project.outputFormat}</span>
+            <span>Preview</span>
+            <span>
+              {project.outputFormat === "portrait"
+                ? "9:16"
+                : project.outputFormat === "square"
+                  ? "1:1"
+                  : "16:9"}
+            </span>
           </header>
           <OutputCanvas
             video={videoEl}
             format={project.outputFormat}
             blur={project.blurBackground}
-            layers={project.layers}
+            layers={layers}
             selectedId={selectedId}
             showBorders={project.showBorders}
             onSelect={setSelectedId}
@@ -527,13 +638,7 @@ export default function Editor({
         currentSource={current}
         playing={playing}
         muted={muted}
-        onSeekSource={(t) => {
-          const v = videoRef.current;
-          if (v) v.currentTime = t;
-          setCurrent(t);
-          const host = clipAtSource(segments, t);
-          if (host) setSelectedClipId(host.id);
-        }}
+        onSeekSource={seekTo}
         onSelect={setSelectedClipId}
         onTrim={(id, start, end) =>
           patch({ clips: trimClip(segments, id, start, end, project.duration || 1) })

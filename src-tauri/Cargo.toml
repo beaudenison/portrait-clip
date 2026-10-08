@@ -1,6 +1,6 @@
 [package]
 name = "portrait-clip"
-version = "1.0.0"
+version = "1.0.1"
 description = "Turn landscape recordings into vertical shorts"
 authors = ["Portrait Clip"]
 edition = "2021"
